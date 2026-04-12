@@ -67,23 +67,6 @@
     <record id="view_sale_order_list_pack" model="ir.ui.view">
         <field name="name">sale.order.list.standard.pack</field>
         <field name="model">sale.order</field>
-        <field name="inherit_id" ref="sale.view_quotation_list"/>
-        <field name="arch" type="xml">
-            <xpath expr="//field[@name='state']" position="before">
-                <field name="pack_compliance_status" widget="badge"
-                       decoration-success="pack_compliance_status == 'compliant'"
-                       decoration-warning="pack_compliance_status == 'warning'"
-                       decoration-danger="pack_compliance_status == 'pending'"
-                       optional="show"
-                       string="Pack"/>
-            </xpath>
-        </field>
-    </record>
-
-    <!-- Also on confirmed sale orders list -->
-    <record id="view_sale_order_list_pack_confirmed" model="ir.ui.view">
-        <field name="name">sale.order.list.standard.pack.confirmed</field>
-        <field name="model">sale.order</field>
         <field name="inherit_id" ref="sale.view_order_tree"/>
         <field name="arch" type="xml">
             <xpath expr="//field[@name='state']" position="before">
