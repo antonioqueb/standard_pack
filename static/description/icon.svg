@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" rx="15" fill="#714B67"/>
+  <g transform="translate(50,50)" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round">
+    <!-- Pallet base -->
+    <rect x="-30" y="10" width="60" height="8" rx="2" fill="white" opacity="0.3"/>
+    <!-- Box 1 -->
+    <rect x="-25" y="-20" width="22" height="28" rx="2" fill="white" opacity="0.7"/>
+    <!-- Box 2 -->
+    <rect x="3" y="-20" width="22" height="28" rx="2" fill="white" opacity="0.9"/>
+    <!-- Box 3 (top) -->
+    <rect x="-12" y="-38" width="24" height="16" rx="2" fill="white" opacity="0.5"/>
+    <!-- Check mark -->
+    <polyline points="8,-30 14,-24 26,-36" stroke="#27AE60" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </g>
+</svg>

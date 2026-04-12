@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="pack_type_pallet" model="standard.pack.type">
+            <field name="name">Tarima</field>
+            <field name="code">PALLET</field>
+            <field name="sequence">10</field>
+            <field name="icon">fa-th</field>
+            <field name="description">Tarima estándar de producto</field>
+        </record>
+
+        <record id="pack_type_box" model="standard.pack.type">
+            <field name="name">Caja</field>
+            <field name="code">BOX</field>
+            <field name="sequence">20</field>
+            <field name="icon">fa-cube</field>
+            <field name="description">Caja de producto</field>
+        </record>
+
+        <record id="pack_type_bundle" model="standard.pack.type">
+            <field name="name">Bulto</field>
+            <field name="code">BUNDLE</field>
+            <field name="sequence">30</field>
+            <field name="icon">fa-cubes</field>
+            <field name="description">Bulto/paquete de producto</field>
+        </record>
+
+        <record id="pack_type_bag" model="standard.pack.type">
+            <field name="name">Saco</field>
+            <field name="code">BAG</field>
+            <field name="sequence">40</field>
+            <field name="icon">fa-archive</field>
+            <field name="description">Saco de producto</field>
+        </record>
+
+        <record id="pack_type_container" model="standard.pack.type">
+            <field name="name">Contenedor</field>
+            <field name="code">CONTAINER</field>
+            <field name="sequence">50</field>
+            <field name="icon">fa-truck</field>
+            <field name="description">Contenedor completo</field>
+        </record>
+    </data>
+</odoo>

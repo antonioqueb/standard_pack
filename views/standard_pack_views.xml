@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- List View -->
+    <record id="view_standard_pack_list" model="ir.ui.view">
+        <field name="name">standard.pack.list</field>
+        <field name="model">standard.pack</field>
+        <field name="arch" type="xml">
+            <list string="Standard Packs" editable="bottom" multi_edit="1">
+                <field name="sequence" widget="handle"/>
+                <field name="product_tmpl_id"/>
+                <field name="pack_type_id"/>
+                <field name="qty_per_pack"/>
+                <field name="uom_id" readonly="1"/>
+                <field name="is_default"/>
+                <field name="company_id" column_invisible="True"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_standard_pack_form" model="ir.ui.view">
+        <field name="name">standard.pack.form</field>
+        <field name="model">standard.pack</field>
+        <field name="arch" type="xml">
+            <form string="Standard Pack">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="display_name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group>
+                            <field name="product_tmpl_id"/>
+                            <field name="pack_type_id"/>
+                        </group>
+                        <group>
+                            <field name="qty_per_pack"/>
+                            <field name="uom_id"/>
+                            <field name="is_default"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_standard_pack_search" model="ir.ui.view">
+        <field name="name">standard.pack.search</field>
+        <field name="model">standard.pack</field>
+        <field name="arch" type="xml">
+            <search string="Standard Packs">
+                <field name="product_tmpl_id"/>
+                <field name="pack_type_id"/>
+                <filter name="filter_default" string="Default Packs" domain="[('is_default', '=', True)]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                    <filter name="group_product" string="Product" context="{'group_by': 'product_tmpl_id'}"/>
+                    <filter name="group_type" string="Pack Type" context="{'group_by': 'pack_type_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+</odoo>

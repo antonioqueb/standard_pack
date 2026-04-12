@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!-- Sale Order Form: add pack compliance header                   -->
+    <!-- ============================================================ -->
+    <record id="view_sale_order_form_pack" model="ir.ui.view">
+        <field name="name">sale.order.form.standard.pack</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <!-- Add compliance status badge in header -->
+            <xpath expr="//field[@name='payment_term_id']" position="after">
+                <field name="pack_compliance_status" widget="badge"
+                       decoration-success="pack_compliance_status == 'compliant'"
+                       decoration-warning="pack_compliance_status == 'warning'"
+                       decoration-danger="pack_compliance_status == 'pending'"
+                       decoration-info="pack_compliance_status == 'na'"
+                       readonly="1"/>
+            </xpath>
+
+            <!-- Extend order lines with pack fields -->
+            <xpath expr="//field[@name='order_line']/list/field[@name='product_uom_qty']" position="before">
+                <field name="has_standard_pack" column_invisible="True"/>
+                <field name="standard_pack_id"
+                       optional="show"
+                       options="{'no_create': True, 'no_open': True}"/>
+                <field name="pack_qty" optional="show"
+                       string="# Packs"/>
+                <field name="qty_per_pack" optional="hide"/>
+            </xpath>
+
+            <xpath expr="//field[@name='order_line']/list/field[@name='product_uom_qty']" position="after">
+                <field name="pack_status" widget="badge"
+                       decoration-success="pack_status == 'compliant'"
+                       decoration-warning="pack_status == 'non_compliant'"
+                       decoration-info="pack_status == 'approved_exception'"
+                       optional="show"/>
+                <field name="pack_status_message" optional="hide"/>
+            </xpath>
+
+            <!-- Add exception request button on order line form -->
+            <xpath expr="//field[@name='order_line']/form//field[@name='product_uom_qty']" position="after">
+                <field name="has_standard_pack" invisible="True"/>
+                <field name="standard_pack_id"
+                       options="{'no_create': True}"/>
+                <field name="pack_qty" string="# Packs"/>
+                <field name="pack_status" widget="badge"
+                       decoration-success="pack_status == 'compliant'"
+                       decoration-warning="pack_status == 'non_compliant'"
+                       decoration-info="pack_status == 'approved_exception'"
+                       readonly="1"/>
+                <field name="pack_status_message" readonly="1"/>
+                <field name="exception_request_id" readonly="1"/>
+                <button name="action_request_pack_exception"
+                        string="Request Exception"
+                        type="object"
+                        class="btn-link"
+                        invisible="pack_status != 'non_compliant'"
+                        icon="fa-exclamation-triangle"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Sale Order List: add compliance column                        -->
+    <!-- ============================================================ -->
+    <record id="view_sale_order_list_pack" model="ir.ui.view">
+        <field name="name">sale.order.list.standard.pack</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_quotation_list"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='state']" position="before">
+                <field name="pack_compliance_status" widget="badge"
+                       decoration-success="pack_compliance_status == 'compliant'"
+                       decoration-warning="pack_compliance_status == 'warning'"
+                       decoration-danger="pack_compliance_status == 'pending'"
+                       optional="show"
+                       string="Pack"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Also on confirmed sale orders list -->
+    <record id="view_sale_order_list_pack_confirmed" model="ir.ui.view">
+        <field name="name">sale.order.list.standard.pack.confirmed</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='state']" position="before">
+                <field name="pack_compliance_status" widget="badge"
+                       decoration-success="pack_compliance_status == 'compliant'"
+                       decoration-warning="pack_compliance_status == 'warning'"
+                       decoration-danger="pack_compliance_status == 'pending'"
+                       optional="show"
+                       string="Pack"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

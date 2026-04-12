@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Inherit product.template form: add Standard Packs tab -->
+    <record id="view_product_template_form_standard_pack" model="ir.ui.view">
+        <field name="name">product.template.form.standard.pack</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_only_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='inventory']" position="after">
+                <page string="Standard Pack" name="standard_pack">
+                    <group>
+                        <group>
+                            <field name="has_standard_pack" readonly="1"/>
+                            <field name="default_pack_id" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="standard_pack_count" string="Packs Defined"/>
+                        </group>
+                    </group>
+                    <field name="standard_pack_ids">
+                        <list editable="bottom">
+                            <field name="sequence" widget="handle"/>
+                            <field name="pack_type_id"/>
+                            <field name="qty_per_pack"/>
+                            <field name="uom_id" readonly="1"/>
+                            <field name="is_default"/>
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Product list: add standard pack indicator -->
+    <record id="view_product_template_list_standard_pack" model="ir.ui.view">
+        <field name="name">product.template.list.standard.pack</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_tree_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='type']" position="after">
+                <field name="has_standard_pack" string="Std Pack"
+                       widget="boolean_toggle" optional="show"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

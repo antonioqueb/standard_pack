@@ -1,0 +1,9 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_pack_type_user,standard.pack.type.user,model_standard_pack_type,base.group_user,1,0,0,0
+access_pack_type_manager,standard.pack.type.manager,model_standard_pack_type,group_standard_pack_manager,1,1,1,1
+access_standard_pack_user,standard.pack.user,model_standard_pack,base.group_user,1,0,0,0
+access_standard_pack_manager,standard.pack.manager,model_standard_pack,group_standard_pack_manager,1,1,1,1
+access_exception_request_restricted,pack.exception.request.restricted,model_pack_exception_request,group_standard_pack_restricted,1,1,1,0
+access_exception_request_approver,pack.exception.request.approver,model_pack_exception_request,group_standard_pack_approver,1,1,1,1
+access_mass_assign_wizard,mass.assign.pack.wizard,model_mass_assign_pack_wizard,group_standard_pack_manager,1,1,1,1
+access_reject_wizard,pack.exception.reject.wizard,model_pack_exception_reject_wizard,group_standard_pack_approver,1,1,1,1

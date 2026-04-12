@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!-- Exception Request List View                                   -->
+    <!-- ============================================================ -->
+    <record id="view_pack_exception_request_list" model="ir.ui.view">
+        <field name="name">pack.exception.request.list</field>
+        <field name="model">pack.exception.request</field>
+        <field name="arch" type="xml">
+            <list string="Pack Exception Requests"
+                  decoration-warning="state == 'pending'"
+                  decoration-success="state == 'approved'"
+                  decoration-danger="state == 'rejected'">
+                <field name="create_date" string="Date"/>
+                <field name="sale_order_id"/>
+                <field name="partner_id"/>
+                <field name="product_id"/>
+                <field name="pack_type_name"/>
+                <field name="qty_per_pack" string="Std Qty/Pack"/>
+                <field name="requested_qty"/>
+                <field name="pack_compliant_qty" string="Nearest Std"/>
+                <field name="difference"/>
+                <field name="requester_id"/>
+                <field name="approver_id" optional="show"/>
+                <field name="state" widget="badge"
+                       decoration-warning="state == 'pending'"
+                       decoration-success="state == 'approved'"
+                       decoration-danger="state == 'rejected'"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Exception Request Form View                                   -->
+    <!-- ============================================================ -->
+    <record id="view_pack_exception_request_form" model="ir.ui.view">
+        <field name="name">pack.exception.request.form</field>
+        <field name="model">pack.exception.request</field>
+        <field name="arch" type="xml">
+            <form string="Pack Exception Request">
+                <header>
+                    <button name="action_approve" string="Approve"
+                            type="object" class="btn-primary"
+                            invisible="state != 'pending'"
+                            groups="standard_pack.group_standard_pack_approver"/>
+                    <button name="action_reject" string="Reject"
+                            type="object" class="btn-danger"
+                            invisible="state != 'pending'"
+                            groups="standard_pack.group_standard_pack_approver"/>
+                    <button name="action_reset_to_pending" string="Reset to Pending"
+                            type="object" class="btn-secondary"
+                            invisible="state == 'pending'"
+                            groups="standard_pack.group_standard_pack_manager"/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="pending,approved,rejected"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="display_name" readonly="1"/>
+                        </h1>
+                    </div>
+                    <group>
+                        <group string="Request Details">
+                            <field name="sale_order_id"/>
+                            <field name="sale_line_id"/>
+                            <field name="product_id"/>
+                            <field name="partner_id"/>
+                        </group>
+                        <group string="Pack Information">
+                            <field name="standard_pack_id"/>
+                            <field name="pack_type_name"/>
+                            <field name="qty_per_pack"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Quantities">
+                            <field name="requested_qty"/>
+                            <field name="pack_compliant_qty"/>
+                            <field name="difference"/>
+                        </group>
+                        <group string="Approval">
+                            <field name="requester_id"/>
+                            <field name="approver_id"/>
+                        </group>
+                    </group>
+                    <group>
+                        <field name="reason" placeholder="Explain why a non-standard quantity is needed..."/>
+                        <field name="rejection_reason"
+                               invisible="state != 'rejected'"
+                               readonly="1"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Search View                                                   -->
+    <!-- ============================================================ -->
+    <record id="view_pack_exception_request_search" model="ir.ui.view">
+        <field name="name">pack.exception.request.search</field>
+        <field name="model">pack.exception.request</field>
+        <field name="arch" type="xml">
+            <search string="Exception Requests">
+                <field name="sale_order_id"/>
+                <field name="product_id"/>
+                <field name="partner_id"/>
+                <field name="requester_id"/>
+                <filter name="filter_pending" string="Pending"
+                        domain="[('state', '=', 'pending')]"/>
+                <filter name="filter_approved" string="Approved"
+                        domain="[('state', '=', 'approved')]"/>
+                <filter name="filter_rejected" string="Rejected"
+                        domain="[('state', '=', 'rejected')]"/>
+                <separator/>
+                <filter name="filter_my_requests" string="My Requests"
+                        domain="[('requester_id', '=', uid)]"/>
+                <separator/>
+                <group expand="0" string="Group By">
+                    <filter name="group_state" string="Status"
+                            context="{'group_by': 'state'}"/>
+                    <filter name="group_product" string="Product"
+                            context="{'group_by': 'product_id'}"/>
+                    <filter name="group_requester" string="Requester"
+                            context="{'group_by': 'requester_id'}"/>
+                    <filter name="group_partner" string="Customer"
+                            context="{'group_by': 'partner_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Action                                                        -->
+    <!-- ============================================================ -->
+    <record id="action_pack_exception_request" model="ir.actions.act_window">
+        <field name="name">Exception Requests</field>
+        <field name="res_model">pack.exception.request</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_pack_exception_request_search"/>
+        <field name="context">{'search_default_filter_pending': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No exception requests yet
+            </p>
+            <p>
+                Exception requests are created when a seller needs to sell
+                a non-standard pack quantity.
+            </p>
+        </field>
+    </record>
+</odoo>

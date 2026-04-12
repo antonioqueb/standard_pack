@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!-- Module Category                                               -->
+    <!-- ============================================================ -->
+    <record id="module_category_standard_pack" model="ir.module.category">
+        <field name="name">Standard Pack</field>
+        <field name="description">Standard Pack access control</field>
+        <field name="sequence">50</field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Security Groups                                               -->
+    <!-- ============================================================ -->
+
+    <!-- Level 1: Restricted — can only sell in exact standard packs -->
+    <!-- Must request exception for any non-standard quantity         -->
+    <record id="group_standard_pack_restricted" model="res.groups">
+        <field name="name">Standard Pack: Restricted Seller</field>
+        <field name="category_id" ref="module_category_standard_pack"/>
+        <field name="comment">
+            Can only sell in exact standard pack multiples.
+            Must submit an exception request to sell non-standard quantities.
+            Cannot confirm orders with non-compliant lines.
+        </field>
+    </record>
+
+    <!-- Level 2: Standard — can sell but gets warnings -->
+    <!-- Still blocked from confirming non-compliant, needs exception -->
+    <record id="group_standard_pack_standard" model="res.groups">
+        <field name="name">Standard Pack: Standard Seller</field>
+        <field name="category_id" ref="module_category_standard_pack"/>
+        <field name="implied_ids" eval="[(4, ref('group_standard_pack_restricted'))]"/>
+        <field name="comment">
+            Can enter any quantity but is warned about non-standard quantities.
+            Must request exception approval before confirming non-compliant orders.
+        </field>
+    </record>
+
+    <!-- Level 3: Unrestricted — full access, only warnings -->
+    <record id="group_standard_pack_unrestricted" model="res.groups">
+        <field name="name">Standard Pack: Unrestricted Seller</field>
+        <field name="category_id" ref="module_category_standard_pack"/>
+        <field name="implied_ids" eval="[(4, ref('group_standard_pack_standard'))]"/>
+        <field name="comment">
+            Can sell any quantity without restriction.
+            Still receives visual warnings for non-standard quantities.
+        </field>
+    </record>
+
+    <!-- Approver — can approve/reject exception requests -->
+    <record id="group_standard_pack_approver" model="res.groups">
+        <field name="name">Standard Pack: Approver</field>
+        <field name="category_id" ref="module_category_standard_pack"/>
+        <field name="comment">
+            Can approve or reject standard pack exception requests.
+            Typically assigned to sales managers or production leads.
+        </field>
+    </record>
+
+    <!-- Manager — can configure pack types and standard packs -->
+    <record id="group_standard_pack_manager" model="res.groups">
+        <field name="name">Standard Pack: Manager</field>
+        <field name="category_id" ref="module_category_standard_pack"/>
+        <field name="implied_ids" eval="[(4, ref('group_standard_pack_approver'))]"/>
+        <field name="comment">
+            Full configuration access: create/edit pack types,
+            define standard packs, mass assign, and approve exceptions.
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Record Rules                                                  -->
+    <!-- ============================================================ -->
+    <record id="rule_exception_request_restricted" model="ir.rule">
+        <field name="name">Exception Request: Restricted sees own</field>
+        <field name="model_id" ref="model_pack_exception_request"/>
+        <field name="groups" eval="[(4, ref('group_standard_pack_restricted'))]"/>
+        <field name="domain_force">[('requester_id', '=', user.id)]</field>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="True"/>
+        <field name="perm_create" eval="True"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
+    <record id="rule_exception_request_approver" model="ir.rule">
+        <field name="name">Exception Request: Approver sees all</field>
+        <field name="model_id" ref="model_pack_exception_request"/>
+        <field name="groups" eval="[(4, ref('group_standard_pack_approver'))]"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+    </record>
+</odoo>
