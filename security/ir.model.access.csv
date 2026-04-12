@@ -7,3 +7,5 @@ access_exception_request_restricted,pack.exception.request.restricted,model_pack
 access_exception_request_approver,pack.exception.request.approver,model_pack_exception_request,group_standard_pack_approver,1,1,1,1
 access_mass_assign_wizard,mass.assign.pack.wizard,model_mass_assign_pack_wizard,group_standard_pack_manager,1,1,1,1
 access_reject_wizard,pack.exception.reject.wizard,model_pack_exception_reject_wizard,group_standard_pack_approver,1,1,1,1
+access_request_wizard_restricted,pack.exception.request.wizard.restricted,model_pack_exception_request_wizard,group_standard_pack_restricted,1,1,1,1
+access_request_wizard_user,pack.exception.request.wizard.user,model_pack_exception_request_wizard,base.group_user,1,1,1,1

@@ -46,7 +46,6 @@ class PackExceptionRequest(models.Model):
         string='Nearest Standard Qty',
         readonly=True,
         digits='Product Unit of Measure',
-        help='The nearest quantity that would comply with the standard pack',
     )
     difference = fields.Float(
         string='Difference',
@@ -65,7 +64,7 @@ class PackExceptionRequest(models.Model):
     )
     reason = fields.Text(
         string='Reason for Exception',
-        tracking=True,
+        required=True, tracking=True,
     )
     rejection_reason = fields.Text(
         string='Rejection Reason',
@@ -94,12 +93,117 @@ class PackExceptionRequest(models.Model):
     @api.depends('product_id.display_name', 'sale_order_id.name')
     def _compute_display_name(self):
         for rec in self:
-            rec.display_name = f"EXC/{rec.sale_order_id.name or 'New'}/{rec.product_id.display_name or ''}"
+            rec.display_name = (
+                f"EXC/{rec.sale_order_id.name or 'New'}"
+                f"/{rec.product_id.display_name or ''}"
+            )
 
     @api.depends('requested_qty', 'pack_compliant_qty')
     def _compute_difference(self):
         for rec in self:
             rec.difference = rec.requested_qty - rec.pack_compliant_qty
+
+    def _get_approver_users(self):
+        """Get all users in the approver group."""
+        approver_group = self.env.ref(
+            'standard_pack.group_standard_pack_approver',
+            raise_if_not_found=False,
+        )
+        if approver_group:
+            return approver_group.users
+        return self.env['res.users']
+
+    def _notify_approvers(self):
+        """Send notification to all approvers about new request."""
+        self.ensure_one()
+        approvers = self._get_approver_users()
+        if not approvers:
+            return
+
+        # Add approvers as followers
+        partner_ids = approvers.mapped('partner_id').ids
+        self.message_subscribe(partner_ids=partner_ids)
+
+        # Post notification
+        self.message_post(
+            body=_(
+                '<strong>New exception request</strong><br/>'
+                '<b>Requester:</b> %(user)s<br/>'
+                '<b>Order:</b> %(order)s<br/>'
+                '<b>Product:</b> %(product)s<br/>'
+                '<b>Requested qty:</b> %(qty)s (Standard pack: %(std)s)<br/>'
+                '<b>Reason:</b> %(reason)s',
+                user=self.requester_id.name,
+                order=self.sale_order_id.name,
+                product=self.product_id.display_name,
+                qty=f"{self.requested_qty:g}",
+                std=self.standard_pack_id.display_name or 'N/A',
+                reason=self.reason or '',
+            ),
+            message_type='notification',
+            subtype_xmlid='mail.mt_comment',
+            partner_ids=partner_ids,
+        )
+
+        # Create activity for each approver
+        for approver in approvers:
+            self.activity_schedule(
+                'mail.mail_activity_data_todo',
+                user_id=approver.id,
+                summary=_(
+                    'Pack exception: %(product)s — %(order)s',
+                    product=self.product_id.display_name,
+                    order=self.sale_order_id.name,
+                ),
+                note=_(
+                    '%(user)s requests to sell %(qty)s of %(product)s '
+                    '(standard pack: %(std)s). Reason: %(reason)s',
+                    user=self.requester_id.name,
+                    qty=f"{self.requested_qty:g}",
+                    product=self.product_id.display_name,
+                    std=self.standard_pack_id.display_name or 'N/A',
+                    reason=self.reason or '',
+                ),
+            )
+
+    def _notify_requester(self, action_type):
+        """Notify the requester about approval/rejection."""
+        self.ensure_one()
+        partner_id = self.requester_id.partner_id.id
+
+        if action_type == 'approved':
+            body = _(
+                '<strong>Exception APPROVED</strong><br/>'
+                '<b>Approved by:</b> %(approver)s<br/>'
+                '<b>Order:</b> %(order)s<br/>'
+                '<b>Product:</b> %(product)s — %(qty)s units<br/>'
+                'You can now confirm the sale order.',
+                approver=self.env.user.name,
+                order=self.sale_order_id.name,
+                product=self.product_id.display_name,
+                qty=f"{self.requested_qty:g}",
+            )
+        else:
+            body = _(
+                '<strong>Exception REJECTED</strong><br/>'
+                '<b>Rejected by:</b> %(approver)s<br/>'
+                '<b>Order:</b> %(order)s<br/>'
+                '<b>Product:</b> %(product)s — %(qty)s units<br/>'
+                '<b>Reason:</b> %(reason)s<br/>'
+                'Please adjust the quantity to a standard pack.',
+                approver=self.env.user.name,
+                order=self.sale_order_id.name,
+                product=self.product_id.display_name,
+                qty=f"{self.requested_qty:g}",
+                reason=self.rejection_reason or '',
+            )
+
+        self.message_post(
+            body=body,
+            message_type='notification',
+            subtype_xmlid='mail.mt_comment',
+            partner_ids=[partner_id],
+        )
 
     def action_approve(self):
         self.ensure_one()
@@ -109,11 +213,12 @@ class PackExceptionRequest(models.Model):
             'state': 'approved',
             'approver_id': self.env.user.id,
         })
+        # Mark activities as done
+        self.activity_ids.action_done()
+        # Notify requester
+        self._notify_requester('approved')
+        # Recompute line status
         self.sale_line_id._compute_pack_status()
-        self.message_post(
-            body=_('Exception request approved by %s', self.env.user.display_name),
-            message_type='notification',
-        )
 
     def action_reject(self):
         self.ensure_one()
@@ -135,3 +240,15 @@ class PackExceptionRequest(models.Model):
             'rejection_reason': False,
         })
         self.sale_line_id._compute_pack_status()
+        self._notify_approvers()
+
+    def action_open_sale_order(self):
+        """Quick action to open the related sale order."""
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'sale.order',
+            'res_id': self.sale_order_id.id,
+            'view_mode': 'form',
+            'target': 'current',
+        }

@@ -1,6 +1,62 @@
 from odoo import models, fields, api, _
 
 
+class PackExceptionRequestWizard(models.TransientModel):
+    """Wizard to create an exception request with a reason."""
+    _name = 'pack.exception.request.wizard'
+    _description = 'Request Pack Exception'
+
+    sale_order_id = fields.Many2one('sale.order', string='Sale Order', readonly=True)
+    sale_line_id = fields.Many2one('sale.order.line', string='Order Line', readonly=True)
+    product_id = fields.Many2one('product.product', string='Product', readonly=True)
+    standard_pack_id = fields.Many2one('standard.pack', string='Standard Pack', readonly=True)
+    requested_qty = fields.Float(string='Requested Quantity', readonly=True, digits='Product Unit of Measure')
+    pack_compliant_qty = fields.Float(string='Nearest Standard Qty', readonly=True, digits='Product Unit of Measure')
+    reason = fields.Text(
+        string='Reason',
+        required=True,
+        help='Explain why a non-standard quantity is needed',
+    )
+
+    def action_submit_request(self):
+        self.ensure_one()
+        line = self.sale_line_id
+
+        # Create the exception request
+        request = self.env['pack.exception.request'].create({
+            'sale_order_id': self.sale_order_id.id,
+            'sale_line_id': line.id,
+            'product_id': self.product_id.id,
+            'standard_pack_id': self.standard_pack_id.id if self.standard_pack_id else False,
+            'requested_qty': self.requested_qty,
+            'pack_compliant_qty': self.pack_compliant_qty,
+            'requester_id': self.env.user.id,
+            'reason': self.reason,
+        })
+
+        # Link to the sale order line
+        line.write({'exception_request_id': request.id})
+
+        # Notify approvers
+        request._notify_approvers()
+
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Exception Request Submitted'),
+                'message': _(
+                    'Your request for %(product)s has been submitted. '
+                    'Approvers have been notified.',
+                    product=self.product_id.display_name,
+                ),
+                'type': 'success',
+                'sticky': False,
+                'next': {'type': 'ir.actions.act_window_close'},
+            },
+        }
+
+
 class MassAssignPack(models.TransientModel):
     _name = 'mass.assign.pack.wizard'
     _description = 'Mass Assign Standard Pack'
@@ -67,14 +123,12 @@ class MassAssignPack(models.TransientModel):
                 continue
 
             if self.overwrite_existing:
-                # Remove existing packs of same type
                 old_packs = self.env['standard.pack'].search([
                     ('product_tmpl_id', '=', product.id),
                     ('pack_type_id', '=', self.pack_type_id.id),
                 ])
                 old_packs.unlink()
 
-            # If setting as default, unset other defaults
             if self.is_default:
                 product.standard_pack_ids.filtered('is_default').write(
                     {'is_default': False}
@@ -126,13 +180,10 @@ class PackExceptionRejectWizard(models.TransientModel):
             'approver_id': self.env.user.id,
             'rejection_reason': self.rejection_reason,
         })
+        # Mark activities as done
+        self.request_id.activity_ids.action_done()
+        # Notify requester
+        self.request_id._notify_requester('rejected')
+        # Recompute line status
         self.request_id.sale_line_id._compute_pack_status()
-        self.request_id.message_post(
-            body=_(
-                'Exception rejected by %(user)s. Reason: %(reason)s',
-                user=self.env.user.display_name,
-                reason=self.rejection_reason,
-            ),
-            message_type='notification',
-        )
         return {'type': 'ir.actions.act_window_close'}

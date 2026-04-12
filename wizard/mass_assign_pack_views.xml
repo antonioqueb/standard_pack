@@ -1,6 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <!-- ============================================================ -->
+    <!-- Exception Request Wizard (from sale order line)                -->
+    <!-- ============================================================ -->
+    <record id="view_pack_exception_request_wizard_form" model="ir.ui.view">
+        <field name="name">pack.exception.request.wizard.form</field>
+        <field name="model">pack.exception.request.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Request Pack Exception">
+                <group string="This quantity does not match the standard pack">
+                    <group>
+                        <field name="sale_order_id" readonly="1"/>
+                        <field name="product_id" readonly="1"/>
+                        <field name="standard_pack_id" readonly="1"/>
+                    </group>
+                    <group>
+                        <field name="requested_qty" readonly="1"/>
+                        <field name="pack_compliant_qty" readonly="1"/>
+                    </group>
+                </group>
+                <group>
+                    <field name="reason" placeholder="Explain why you need a non-standard quantity..."
+                           widget="text"/>
+                </group>
+                <field name="sale_line_id" invisible="1"/>
+                <footer>
+                    <button name="action_submit_request" string="Submit Request"
+                            type="object" class="btn-primary"
+                            icon="fa-paper-plane"/>
+                    <button string="Cancel" class="btn-secondary"
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
     <!-- Mass Assign Pack Wizard                                       -->
     <!-- ============================================================ -->
     <record id="view_mass_assign_pack_wizard_form" model="ir.ui.view">
@@ -20,7 +55,7 @@
                                string="Products affected"/>
                     </group>
                 </group>
-                <group string="Specific Products (leave empty to use selected products)">
+                <group string="Specific Products (leave empty to use selected)">
                     <field name="product_tmpl_ids" nolabel="1"
                            widget="many2many_tags"/>
                 </group>
@@ -55,7 +90,8 @@
                 <group>
                     <field name="request_id" readonly="1"/>
                     <field name="rejection_reason"
-                           placeholder="Explain why this exception is rejected..."/>
+                           placeholder="Explain why this exception is rejected..."
+                           widget="text"/>
                 </group>
                 <footer>
                     <button name="action_confirm_reject" string="Confirm Rejection"

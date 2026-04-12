@@ -35,6 +35,8 @@ class SaleOrderLine(models.Model):
             ('compliant', 'Compliant'),
             ('non_compliant', 'Non-Compliant'),
             ('approved_exception', 'Approved Exception'),
+            ('pending_exception', 'Pending Approval'),
+            ('rejected_exception', 'Rejected'),
             ('no_pack', 'No Pack Defined'),
         ],
         string='Pack Status',
@@ -59,26 +61,19 @@ class SaleOrderLine(models.Model):
         readonly=True,
         copy=False,
     )
-    exception_approved = fields.Boolean(
-        string='Exception Approved',
-        compute='_compute_exception_approved',
-        store=True,
+    exception_state = fields.Selection(
+        related='exception_request_id.state',
+        string='Exception State',
+        readonly=True,
     )
-
-    @api.depends('exception_request_id', 'exception_request_id.state')
-    def _compute_exception_approved(self):
-        for line in self:
-            line.exception_approved = (
-                line.exception_request_id
-                and line.exception_request_id.state == 'approved'
-            )
 
     @api.depends(
         'product_template_id',
         'product_uom_qty',
         'standard_pack_id',
         'pack_qty',
-        'exception_approved',
+        'exception_request_id',
+        'exception_request_id.state',
     )
     def _compute_pack_status(self):
         for line in self:
@@ -102,7 +97,12 @@ class SaleOrderLine(models.Model):
                 continue
 
             expected_qty = line.pack_qty * line.standard_pack_id.qty_per_pack
-            if line.product_uom_qty and abs(line.product_uom_qty - expected_qty) < 0.001:
+            is_exact_multiple = (
+                line.product_uom_qty
+                and abs(line.product_uom_qty - expected_qty) < 0.001
+            )
+
+            if is_exact_multiple:
                 line.pack_status = 'compliant'
                 line.pack_status_message = _(
                     '%(packs)s × %(qty)s = %(total)s %(uom)s',
@@ -111,9 +111,23 @@ class SaleOrderLine(models.Model):
                     total=f"{line.product_uom_qty:g}",
                     uom=line.product_uom.name or '',
                 )
-            elif line.exception_approved:
-                line.pack_status = 'approved_exception'
-                line.pack_status_message = _('Non-standard qty approved')
+            elif line.exception_request_id:
+                exc_state = line.exception_request_id.state
+                if exc_state == 'approved':
+                    line.pack_status = 'approved_exception'
+                    line.pack_status_message = _(
+                        'Approved by %s',
+                        line.exception_request_id.approver_id.name or '',
+                    )
+                elif exc_state == 'pending':
+                    line.pack_status = 'pending_exception'
+                    line.pack_status_message = _('Waiting for approval')
+                elif exc_state == 'rejected':
+                    line.pack_status = 'rejected_exception'
+                    reason = line.exception_request_id.rejection_reason or ''
+                    line.pack_status_message = _(
+                        'Rejected: %s', reason[:80],
+                    )
             else:
                 line.pack_status = 'non_compliant'
                 nearest = self._get_nearest_pack_qty(line)
@@ -139,7 +153,6 @@ class SaleOrderLine(models.Model):
 
     @api.onchange('standard_pack_id')
     def _onchange_standard_pack_id(self):
-        """When selecting a pack, reset pack qty to 1 and compute total."""
         if self.standard_pack_id:
             if not self.pack_qty:
                 self.pack_qty = 1
@@ -149,13 +162,11 @@ class SaleOrderLine(models.Model):
 
     @api.onchange('pack_qty')
     def _onchange_pack_qty(self):
-        """Recalculate product_uom_qty based on pack qty."""
         if self.standard_pack_id and self.pack_qty:
             self.product_uom_qty = self.pack_qty * self.standard_pack_id.qty_per_pack
 
     @api.onchange('product_id')
     def _onchange_product_id_set_pack(self):
-        """Auto-select default pack when product changes."""
         if self.product_template_id and self.product_template_id.has_standard_pack:
             default_pack = self.product_template_id.default_pack_id
             if default_pack:
@@ -165,7 +176,6 @@ class SaleOrderLine(models.Model):
 
     @api.onchange('product_uom_qty')
     def _onchange_product_uom_qty_check_pack(self):
-        """Check if manually entered qty matches a pack multiple."""
         if (
             self.standard_pack_id
             and self.product_uom_qty
@@ -175,58 +185,54 @@ class SaleOrderLine(models.Model):
             packs = self.product_uom_qty / pack_size
             if abs(packs - round(packs)) < 0.001:
                 self.pack_qty = round(packs)
-            else:
-                # Don't reset pack_qty, let the status show non-compliant
-                pass
 
     def _check_pack_restriction(self):
         """
         Validate pack compliance based on user permission level.
         Called before confirming the sale order.
         """
-        restricted_group = self.env.ref(
-            'standard_pack.group_standard_pack_restricted', raise_if_not_found=False
-        )
-        unrestricted_group = self.env.ref(
-            'standard_pack.group_standard_pack_unrestricted', raise_if_not_found=False
-        )
-
         user = self.env.user
-        is_unrestricted = unrestricted_group and user.has_group(
+        is_unrestricted = user.has_group(
             'standard_pack.group_standard_pack_unrestricted'
-        )
-        is_restricted = restricted_group and user.has_group(
-            'standard_pack.group_standard_pack_restricted'
         )
 
         for line in self:
             if line.display_type or not line.product_template_id.has_standard_pack:
                 continue
+
             if line.pack_status in ('compliant', 'no_pack', 'approved_exception'):
                 continue
 
-            # Non-compliant line found
-            if is_restricted:
+            if line.pack_status == 'pending_exception':
                 raise ValidationError(_(
-                    'Line "%(product)s": The quantity %(qty)s does not match '
-                    'any standard pack. You must request an exception before '
-                    'confirming this order.',
+                    'Line "%(product)s": Exception request is pending approval. '
+                    'Cannot confirm until approved.',
+                    product=line.product_id.display_name,
+                ))
+
+            if line.pack_status == 'rejected_exception':
+                raise ValidationError(_(
+                    'Line "%(product)s": Exception was rejected. '
+                    'Adjust the quantity or submit a new request.',
+                    product=line.product_id.display_name,
+                ))
+
+            # non_compliant without exception
+            if not is_unrestricted:
+                raise ValidationError(_(
+                    'Line "%(product)s": Quantity %(qty)s does not match '
+                    'the standard pack (%(pack)s). '
+                    'Request an exception before confirming.',
                     product=line.product_id.display_name,
                     qty=f"{line.product_uom_qty:g}",
+                    pack=line.standard_pack_id.display_name or 'N/A',
                 ))
-            elif not is_unrestricted:
-                # Standard user — also blocked but with different message
-                raise ValidationError(_(
-                    'Line "%(product)s": Non-standard quantity %(qty)s. '
-                    'Please request an exception or adjust to a standard pack.',
-                    product=line.product_id.display_name,
-                    qty=f"{line.product_uom_qty:g}",
-                ))
-            # Unrestricted user — allowed but status stays as warning
 
     def action_request_pack_exception(self):
-        """Create an exception request for non-standard quantity."""
+        """Open wizard to create exception request with reason."""
         self.ensure_one()
+
+        # If already has a request, open it
         if self.exception_request_id:
             return {
                 'type': 'ir.actions.act_window',
@@ -236,20 +242,24 @@ class SaleOrderLine(models.Model):
                 'target': 'current',
             }
 
-        request = self.env['pack.exception.request'].create({
-            'sale_order_id': self.order_id.id,
-            'sale_line_id': self.id,
-            'product_id': self.product_id.id,
-            'standard_pack_id': self.standard_pack_id.id,
-            'requested_qty': self.product_uom_qty,
-            'pack_compliant_qty': self._get_nearest_pack_qty(self),
-            'requester_id': self.env.user.id,
-        })
-        self.exception_request_id = request
+        # Open the request wizard
         return {
             'type': 'ir.actions.act_window',
-            'res_model': 'pack.exception.request',
-            'res_id': request.id,
+            'res_model': 'pack.exception.request.wizard',
             'view_mode': 'form',
-            'target': 'current',
+            'target': 'new',
+            'context': {
+                'default_sale_order_id': self.order_id.id,
+                'default_sale_line_id': self.id,
+                'default_product_id': self.product_id.id,
+                'default_standard_pack_id': self.standard_pack_id.id if self.standard_pack_id else False,
+                'default_requested_qty': self.product_uom_qty,
+                'default_pack_compliant_qty': self._get_nearest_pack_qty(self),
+            },
         }
+
+    def action_reset_exception(self):
+        """Clear rejected exception so user can re-request."""
+        self.ensure_one()
+        if self.exception_request_id and self.exception_request_id.state == 'rejected':
+            self.exception_request_id = False
