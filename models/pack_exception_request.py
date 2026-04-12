@@ -1,3 +1,4 @@
+from markupsafe import Markup, escape
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 
@@ -104,7 +105,6 @@ class PackExceptionRequest(models.Model):
             rec.difference = rec.requested_qty - rec.pack_compliant_qty
 
     def _get_approver_users(self):
-        """Get all users in the approver group."""
         approver_group = self.env.ref(
             'standard_pack.group_standard_pack_approver',
             raise_if_not_found=False,
@@ -114,90 +114,84 @@ class PackExceptionRequest(models.Model):
         return self.env['res.users']
 
     def _notify_approvers(self):
-        """Send notification to all approvers about new request."""
+        """Notify approvers on the exception request chatter."""
         self.ensure_one()
         approvers = self._get_approver_users()
         if not approvers:
             return
 
-        # Add approvers as followers
         partner_ids = approvers.mapped('partner_id').ids
         self.message_subscribe(partner_ids=partner_ids)
 
-        # Post notification
+        body = Markup(
+            '<strong>Nueva solicitud de excepción</strong><br/>'
+            '<b>Solicitante:</b> {user}<br/>'
+            '<b>Orden:</b> {order}<br/>'
+            '<b>Producto:</b> {product}<br/>'
+            '<b>Cantidad solicitada:</b> {qty} (Pack estándar: {std})<br/>'
+            '<b>Motivo:</b> {reason}'
+        ).format(
+            user=escape(self.requester_id.name),
+            order=escape(self.sale_order_id.name),
+            product=escape(self.product_id.display_name),
+            qty=f"{self.requested_qty:g}",
+            std=escape(self.standard_pack_id.display_name or 'N/A'),
+            reason=escape(self.reason or ''),
+        )
         self.message_post(
-            body=_(
-                '<strong>New exception request</strong><br/>'
-                '<b>Requester:</b> %(user)s<br/>'
-                '<b>Order:</b> %(order)s<br/>'
-                '<b>Product:</b> %(product)s<br/>'
-                '<b>Requested qty:</b> %(qty)s (Standard pack: %(std)s)<br/>'
-                '<b>Reason:</b> %(reason)s',
-                user=self.requester_id.name,
-                order=self.sale_order_id.name,
-                product=self.product_id.display_name,
-                qty=f"{self.requested_qty:g}",
-                std=self.standard_pack_id.display_name or 'N/A',
-                reason=self.reason or '',
-            ),
-            message_type='notification',
+            body=body,
+            message_type='comment',
             subtype_xmlid='mail.mt_comment',
             partner_ids=partner_ids,
         )
 
-        # Create activity for each approver
         for approver in approvers:
             self.activity_schedule(
                 'mail.mail_activity_data_todo',
                 user_id=approver.id,
-                summary=_(
-                    'Pack exception: %(product)s — %(order)s',
-                    product=self.product_id.display_name,
-                    order=self.sale_order_id.name,
-                ),
-                note=_(
-                    '%(user)s requests to sell %(qty)s of %(product)s '
-                    '(standard pack: %(std)s). Reason: %(reason)s',
-                    user=self.requester_id.name,
-                    qty=f"{self.requested_qty:g}",
-                    product=self.product_id.display_name,
-                    std=self.standard_pack_id.display_name or 'N/A',
-                    reason=self.reason or '',
-                ),
+                summary=_('Excepción pack: %s — %s',
+                          self.product_id.display_name,
+                          self.sale_order_id.name),
+                note=_('%s solicita vender %s de %s (pack estándar: %s). Motivo: %s',
+                       self.requester_id.name,
+                       f"{self.requested_qty:g}",
+                       self.product_id.display_name,
+                       self.standard_pack_id.display_name or 'N/A',
+                       self.reason or ''),
             )
 
     def _notify_requester(self, action_type):
-        """Notify the requester on the SALE ORDER chatter."""
+        """Notify the requester ONLY on the sale order chatter."""
         self.ensure_one()
         requester_partner_id = self.requester_id.partner_id.id
 
-        # Ensure requester is follower of the sale order
         self.sale_order_id.message_subscribe(partner_ids=[requester_partner_id])
 
         if action_type == 'approved':
-            body = _(
-                '<strong>✅ Pack exception approved</strong><br/>'
-                '<b>Product:</b> %(product)s<br/>'
-                '<b>Quantity:</b> %(qty)s approved by %(approver)s<br/>'
-                'You can now confirm this order.',
-                product=self.product_id.display_name,
+            body = Markup(
+                '<strong>✅ Excepción de pack aprobada</strong><br/>'
+                '<b>Producto:</b> {product}<br/>'
+                '<b>Cantidad:</b> {qty} aprobada por {approver}<br/>'
+                'Ya puedes confirmar esta orden.'
+            ).format(
+                product=escape(self.product_id.display_name),
                 qty=f"{self.requested_qty:g}",
-                approver=self.env.user.name,
+                approver=escape(self.env.user.name),
             )
         else:
-            body = _(
-                '<strong>❌ Pack exception rejected</strong><br/>'
-                '<b>Product:</b> %(product)s<br/>'
-                '<b>Quantity:</b> %(qty)s rejected by %(approver)s<br/>'
-                '<b>Reason:</b> %(reason)s<br/>'
-                'Please adjust the quantity to a standard pack.',
-                product=self.product_id.display_name,
+            body = Markup(
+                '<strong>❌ Excepción de pack rechazada</strong><br/>'
+                '<b>Producto:</b> {product}<br/>'
+                '<b>Cantidad:</b> {qty} rechazada por {approver}<br/>'
+                '<b>Motivo:</b> {reason}<br/>'
+                'Ajusta la cantidad a un pack estándar.'
+            ).format(
+                product=escape(self.product_id.display_name),
                 qty=f"{self.requested_qty:g}",
-                approver=self.env.user.name,
-                reason=self.rejection_reason or '',
+                approver=escape(self.env.user.name),
+                reason=escape(self.rejection_reason or ''),
             )
 
-        # Post on the sale order — requester gets notified there
         self.sale_order_id.message_post(
             body=body,
             message_type='comment',
@@ -208,22 +202,19 @@ class PackExceptionRequest(models.Model):
     def action_approve(self):
         self.ensure_one()
         if not self.env.user.has_group('standard_pack.group_standard_pack_approver'):
-            raise UserError(_('You do not have permission to approve exception requests.'))
+            raise UserError(_('No tienes permisos para aprobar solicitudes de excepción.'))
         self.write({
             'state': 'approved',
             'approver_id': self.env.user.id,
         })
-        # Mark activities as done
         self.activity_ids.action_done()
-        # Notify requester
         self._notify_requester('approved')
-        # Recompute line status
         self.sale_line_id._compute_pack_status()
 
     def action_reject(self):
         self.ensure_one()
         if not self.env.user.has_group('standard_pack.group_standard_pack_approver'):
-            raise UserError(_('You do not have permission to reject exception requests.'))
+            raise UserError(_('No tienes permisos para rechazar solicitudes de excepción.'))
         return {
             'type': 'ir.actions.act_window',
             'res_model': 'pack.exception.reject.wizard',
@@ -243,7 +234,6 @@ class PackExceptionRequest(models.Model):
         self._notify_approvers()
 
     def action_open_sale_order(self):
-        """Quick action to open the related sale order."""
         self.ensure_one()
         return {
             'type': 'ir.actions.act_window',
