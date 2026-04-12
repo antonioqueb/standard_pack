@@ -167,42 +167,42 @@ class PackExceptionRequest(models.Model):
             )
 
     def _notify_requester(self, action_type):
-        """Notify the requester about approval/rejection."""
+        """Notify the requester on the SALE ORDER chatter."""
         self.ensure_one()
-        partner_id = self.requester_id.partner_id.id
+        requester_partner_id = self.requester_id.partner_id.id
+
+        # Ensure requester is follower of the sale order
+        self.sale_order_id.message_subscribe(partner_ids=[requester_partner_id])
 
         if action_type == 'approved':
             body = _(
-                '<strong>Exception APPROVED</strong><br/>'
-                '<b>Approved by:</b> %(approver)s<br/>'
-                '<b>Order:</b> %(order)s<br/>'
-                '<b>Product:</b> %(product)s — %(qty)s units<br/>'
-                'You can now confirm the sale order.',
-                approver=self.env.user.name,
-                order=self.sale_order_id.name,
+                '<strong>✅ Pack exception approved</strong><br/>'
+                '<b>Product:</b> %(product)s<br/>'
+                '<b>Quantity:</b> %(qty)s approved by %(approver)s<br/>'
+                'You can now confirm this order.',
                 product=self.product_id.display_name,
                 qty=f"{self.requested_qty:g}",
+                approver=self.env.user.name,
             )
         else:
             body = _(
-                '<strong>Exception REJECTED</strong><br/>'
-                '<b>Rejected by:</b> %(approver)s<br/>'
-                '<b>Order:</b> %(order)s<br/>'
-                '<b>Product:</b> %(product)s — %(qty)s units<br/>'
+                '<strong>❌ Pack exception rejected</strong><br/>'
+                '<b>Product:</b> %(product)s<br/>'
+                '<b>Quantity:</b> %(qty)s rejected by %(approver)s<br/>'
                 '<b>Reason:</b> %(reason)s<br/>'
                 'Please adjust the quantity to a standard pack.',
-                approver=self.env.user.name,
-                order=self.sale_order_id.name,
                 product=self.product_id.display_name,
                 qty=f"{self.requested_qty:g}",
+                approver=self.env.user.name,
                 reason=self.rejection_reason or '',
             )
 
-        self.message_post(
+        # Post on the sale order — requester gets notified there
+        self.sale_order_id.message_post(
             body=body,
-            message_type='notification',
+            message_type='comment',
             subtype_xmlid='mail.mt_comment',
-            partner_ids=[partner_id],
+            partner_ids=[requester_partner_id],
         )
 
     def action_approve(self):
