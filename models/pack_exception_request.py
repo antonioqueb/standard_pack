@@ -199,6 +199,26 @@ class PackExceptionRequest(models.Model):
             partner_ids=[requester_partner_id],
         )
 
+        # Create activity on the sale order for the requester
+        if action_type == 'approved':
+            summary = _('Excepción aprobada — confirmar orden')
+            note = _('La excepción para %s (%s uds) fue aprobada. Puedes confirmar la orden.',
+                     self.product_id.display_name,
+                     f"{self.requested_qty:g}")
+        else:
+            summary = _('Excepción rechazada — ajustar cantidad')
+            note = _('La excepción para %s (%s uds) fue rechazada. Motivo: %s',
+                     self.product_id.display_name,
+                     f"{self.requested_qty:g}",
+                     self.rejection_reason or '')
+
+        self.sale_order_id.activity_schedule(
+            'mail.mail_activity_data_todo',
+            user_id=self.requester_id.id,
+            summary=summary,
+            note=note,
+        )
+
     def action_approve(self):
         self.ensure_one()
         if not self.env.user.has_group('standard_pack.group_standard_pack_approver'):
