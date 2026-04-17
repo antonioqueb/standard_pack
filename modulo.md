@@ -222,15 +222,63 @@ class PackExceptionRequest(models.Model):
             return approver_group.users
         return self.env['res.users']
 
+    def _post_comment_no_autofollow(self, target_record, body):
+        """Publica comentario sin suscribir followers automáticamente."""
+        if not target_record or not target_record.id:
+            return
+        target_record.with_context(
+            mail_post_autofollow=False,
+            mail_create_nosubscribe=True,
+            mail_notify_force_send=False,
+        ).message_post(
+            body=body,
+            message_type='comment',
+            subtype_xmlid='mail.mt_comment',
+        )
+
+    def _create_todo_activity_once(self, target_record, user, summary, note):
+        """Crea actividad sin usar activity_schedule y sin autofollow."""
+        if not target_record or not target_record.id or not user:
+            return
+
+        activity_type = self.env.ref('mail.mail_activity_data_todo', raise_if_not_found=False)
+        if not activity_type:
+            return
+
+        model = self.env['ir.model']._get(target_record._name)
+        if not model:
+            return
+
+        deadline = fields.Date.context_today(self)
+
+        existing = self.env['mail.activity'].search([
+            ('res_model_id', '=', model.id),
+            ('res_id', '=', target_record.id),
+            ('user_id', '=', user.id),
+            ('activity_type_id', '=', activity_type.id),
+            ('summary', '=', summary),
+            ('date_deadline', '=', deadline),
+        ], limit=1)
+
+        if existing:
+            return
+
+        self.env['mail.activity'].create({
+            'activity_type_id': activity_type.id,
+            'res_model_id': model.id,
+            'res_id': target_record.id,
+            'user_id': user.id,
+            'summary': summary,
+            'note': note,
+            'date_deadline': deadline,
+        })
+
     def _notify_approvers(self):
-        """Notify approvers on the exception request chatter."""
+        """Notifica aprobadores en la solicitud sin tocar followers."""
         self.ensure_one()
         approvers = self._get_approver_users()
         if not approvers:
             return
-
-        partner_ids = approvers.mapped('partner_id').ids
-        self.message_subscribe(partner_ids=partner_ids)
 
         body = Markup(
             '<strong>Nueva solicitud de excepción</strong><br/>'
@@ -247,34 +295,27 @@ class PackExceptionRequest(models.Model):
             std=escape(self.standard_pack_id.display_name or 'N/A'),
             reason=escape(self.reason or ''),
         )
-        self.message_post(
-            body=body,
-            message_type='comment',
-            subtype_xmlid='mail.mt_comment',
-            partner_ids=partner_ids,
-        )
+
+        self._post_comment_no_autofollow(self, body)
 
         for approver in approvers:
-            self.activity_schedule(
-                'mail.mail_activity_data_todo',
-                user_id=approver.id,
-                summary=_('Excepción pack: %s — %s',
-                          self.product_id.display_name,
-                          self.sale_order_id.name),
-                note=_('%s solicita vender %s de %s (pack estándar: %s). Motivo: %s',
-                       self.requester_id.name,
-                       f"{self.requested_qty:g}",
-                       self.product_id.display_name,
-                       self.standard_pack_id.display_name or 'N/A',
-                       self.reason or ''),
+            self._create_todo_activity_once(
+                self,
+                approver,
+                _('Excepción pack: %s — %s',
+                  self.product_id.display_name,
+                  self.sale_order_id.name),
+                _('%s solicita vender %s de %s (pack estándar: %s). Motivo: %s',
+                  self.requester_id.name,
+                  f"{self.requested_qty:g}",
+                  self.product_id.display_name,
+                  self.standard_pack_id.display_name or 'N/A',
+                  self.reason or ''),
             )
 
     def _notify_requester(self, action_type):
-        """Notify the requester ONLY on the sale order chatter."""
+        """Notifica al solicitante en la OV sin suscribir followers."""
         self.ensure_one()
-        requester_partner_id = self.requester_id.partner_id.id
-
-        self.sale_order_id.message_subscribe(partner_ids=[requester_partner_id])
 
         if action_type == 'approved':
             body = Markup(
@@ -287,6 +328,10 @@ class PackExceptionRequest(models.Model):
                 qty=f"{self.requested_qty:g}",
                 approver=escape(self.env.user.name),
             )
+            summary = _('Excepción aprobada — confirmar orden')
+            note = _('La excepción para %s (%s uds) fue aprobada. Puedes confirmar la orden.',
+                     self.product_id.display_name,
+                     f"{self.requested_qty:g}")
         else:
             body = Markup(
                 '<strong>❌ Excepción de pack rechazada</strong><br/>'
@@ -300,32 +345,18 @@ class PackExceptionRequest(models.Model):
                 approver=escape(self.env.user.name),
                 reason=escape(self.rejection_reason or ''),
             )
-
-        self.sale_order_id.message_post(
-            body=body,
-            message_type='comment',
-            subtype_xmlid='mail.mt_comment',
-            partner_ids=[requester_partner_id],
-        )
-
-        # Create activity on the sale order for the requester
-        if action_type == 'approved':
-            summary = _('Excepción aprobada — confirmar orden')
-            note = _('La excepción para %s (%s uds) fue aprobada. Puedes confirmar la orden.',
-                     self.product_id.display_name,
-                     f"{self.requested_qty:g}")
-        else:
             summary = _('Excepción rechazada — ajustar cantidad')
             note = _('La excepción para %s (%s uds) fue rechazada. Motivo: %s',
                      self.product_id.display_name,
                      f"{self.requested_qty:g}",
                      self.rejection_reason or '')
 
-        self.sale_order_id.activity_schedule(
-            'mail.mail_activity_data_todo',
-            user_id=self.requester_id.id,
-            summary=summary,
-            note=note,
+        self._post_comment_no_autofollow(self.sale_order_id, body)
+        self._create_todo_activity_once(
+            self.sale_order_id,
+            self.requester_id,
+            summary,
+            note,
         )
 
     def action_approve(self):
@@ -442,86 +473,6 @@ class ProductTemplate(models.Model):
                 lambda p: p.is_default and p.active
             )
             product.default_pack_id = default[:1] if default else False
-```
-
-## ./models/sale_order.py
-```py
-from odoo import models, fields, api
-
-
-class SaleOrder(models.Model):
-    _inherit = 'sale.order'
-
-    pack_compliance_status = fields.Selection(
-        [
-            ('compliant', 'All Standard Packs'),
-            ('warning', 'Non-Standard Quantities'),
-            ('pending', 'Pending Approvals'),
-            ('na', 'N/A'),
-        ],
-        string='Pack Compliance',
-        compute='_compute_pack_compliance_status',
-        store=True,
-    )
-    has_pending_pack_requests = fields.Boolean(
-        string='Pending Pack Requests',
-        compute='_compute_pack_compliance_status',
-        store=True,
-    )
-
-    @api.depends(
-        'order_line.pack_status',
-        'order_line.exception_request_id',
-        'order_line.exception_request_id.state',
-    )
-    def _compute_pack_compliance_status(self):
-        for order in self:
-            lines_with_pack = order.order_line.filtered(
-                lambda l: l.product_template_id.has_standard_pack and not l.display_type
-            )
-            if not lines_with_pack:
-                order.pack_compliance_status = 'na'
-                order.has_pending_pack_requests = False
-                continue
-
-            has_pending = any(
-                l.exception_request_id and l.exception_request_id.state == 'pending'
-                for l in lines_with_pack
-            )
-            has_non_compliant = any(
-                l.pack_status == 'non_compliant' for l in lines_with_pack
-            )
-
-            order.has_pending_pack_requests = has_pending
-
-            if has_pending:
-                order.pack_compliance_status = 'pending'
-            elif has_non_compliant:
-                order.pack_compliance_status = 'warning'
-            else:
-                order.pack_compliance_status = 'compliant'
-
-    def action_confirm(self):
-        """Override to check pack compliance before confirming."""
-        for order in self:
-            pack_lines = order.order_line.filtered(
-                lambda l: not l.display_type and l.product_template_id.has_standard_pack
-            )
-            pack_lines._check_pack_restriction()
-
-            # Block if there are pending exception requests
-            pending = pack_lines.filtered(
-                lambda l: l.exception_request_id and l.exception_request_id.state == 'pending'
-            )
-            if pending:
-                from odoo.exceptions import ValidationError
-                raise ValidationError(_(
-                    'Cannot confirm: there are pending exception requests '
-                    'for the following products: %s',
-                    ', '.join(pending.mapped('product_id.display_name')),
-                ))
-
-        return super().action_confirm()
 ```
 
 ## ./models/sale_order_line.py
@@ -791,6 +742,86 @@ class SaleOrderLine(models.Model):
         self.ensure_one()
         if self.exception_request_id and self.exception_request_id.state == 'rejected':
             self.exception_request_id = False```
+
+## ./models/sale_order.py
+```py
+from odoo import models, fields, api
+
+
+class SaleOrder(models.Model):
+    _inherit = 'sale.order'
+
+    pack_compliance_status = fields.Selection(
+        [
+            ('compliant', 'All Standard Packs'),
+            ('warning', 'Non-Standard Quantities'),
+            ('pending', 'Pending Approvals'),
+            ('na', 'N/A'),
+        ],
+        string='Pack Compliance',
+        compute='_compute_pack_compliance_status',
+        store=True,
+    )
+    has_pending_pack_requests = fields.Boolean(
+        string='Pending Pack Requests',
+        compute='_compute_pack_compliance_status',
+        store=True,
+    )
+
+    @api.depends(
+        'order_line.pack_status',
+        'order_line.exception_request_id',
+        'order_line.exception_request_id.state',
+    )
+    def _compute_pack_compliance_status(self):
+        for order in self:
+            lines_with_pack = order.order_line.filtered(
+                lambda l: l.product_template_id.has_standard_pack and not l.display_type
+            )
+            if not lines_with_pack:
+                order.pack_compliance_status = 'na'
+                order.has_pending_pack_requests = False
+                continue
+
+            has_pending = any(
+                l.exception_request_id and l.exception_request_id.state == 'pending'
+                for l in lines_with_pack
+            )
+            has_non_compliant = any(
+                l.pack_status == 'non_compliant' for l in lines_with_pack
+            )
+
+            order.has_pending_pack_requests = has_pending
+
+            if has_pending:
+                order.pack_compliance_status = 'pending'
+            elif has_non_compliant:
+                order.pack_compliance_status = 'warning'
+            else:
+                order.pack_compliance_status = 'compliant'
+
+    def action_confirm(self):
+        """Override to check pack compliance before confirming."""
+        for order in self:
+            pack_lines = order.order_line.filtered(
+                lambda l: not l.display_type and l.product_template_id.has_standard_pack
+            )
+            pack_lines._check_pack_restriction()
+
+            # Block if there are pending exception requests
+            pending = pack_lines.filtered(
+                lambda l: l.exception_request_id and l.exception_request_id.state == 'pending'
+            )
+            if pending:
+                from odoo.exceptions import ValidationError
+                raise ValidationError(_(
+                    'Cannot confirm: there are pending exception requests '
+                    'for the following products: %s',
+                    ', '.join(pending.mapped('product_id.display_name')),
+                ))
+
+        return super().action_confirm()
+```
 
 ## ./models/standard_pack.py
 ```py
@@ -1469,6 +1500,114 @@ class StandardPack(models.Model):
 from . import mass_assign_pack
 ```
 
+## ./wizard/mass_assign_pack_views.xml
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- ============================================================ -->
+    <!-- Exception Request Wizard (from sale order line)                -->
+    <!-- ============================================================ -->
+    <record id="view_pack_exception_request_wizard_form" model="ir.ui.view">
+        <field name="name">pack.exception.request.wizard.form</field>
+        <field name="model">pack.exception.request.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Request Pack Exception">
+                <group string="This quantity does not match the standard pack">
+                    <group>
+                        <field name="sale_order_id" readonly="1"/>
+                        <field name="product_id" readonly="1"/>
+                        <field name="standard_pack_id" readonly="1"/>
+                    </group>
+                    <group>
+                        <field name="requested_qty" readonly="1"/>
+                        <field name="pack_compliant_qty" readonly="1"/>
+                    </group>
+                </group>
+                <group>
+                    <field name="reason" placeholder="Explain why you need a non-standard quantity..."
+                           widget="text"/>
+                </group>
+                <field name="sale_line_id" invisible="1"/>
+                <footer>
+                    <button name="action_submit_request" string="Submit Request"
+                            type="object" class="btn-primary"
+                            icon="fa-paper-plane"/>
+                    <button string="Cancel" class="btn-secondary"
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Mass Assign Pack Wizard                                       -->
+    <!-- ============================================================ -->
+    <record id="view_mass_assign_pack_wizard_form" model="ir.ui.view">
+        <field name="name">mass.assign.pack.wizard.form</field>
+        <field name="model">mass.assign.pack.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Mass Assign Standard Pack">
+                <group>
+                    <group>
+                        <field name="pack_type_id"/>
+                        <field name="qty_per_pack"/>
+                        <field name="is_default"/>
+                    </group>
+                    <group>
+                        <field name="overwrite_existing"/>
+                        <field name="preview_count" readonly="1"
+                               string="Products affected"/>
+                    </group>
+                </group>
+                <group string="Specific Products (leave empty to use selected)">
+                    <field name="product_tmpl_ids" nolabel="1"
+                           widget="many2many_tags"/>
+                </group>
+                <footer>
+                    <button name="action_assign" string="Assign Pack"
+                            type="object" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary"
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action for wizard (from product list) -->
+    <record id="action_mass_assign_pack_wizard" model="ir.actions.act_window">
+        <field name="name">Assign Standard Pack</field>
+        <field name="res_model">mass.assign.pack.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="binding_model_id" ref="product.model_product_template"/>
+        <field name="binding_view_types">list</field>
+    </record>
+
+    <!-- ============================================================ -->
+    <!-- Reject Wizard                                                 -->
+    <!-- ============================================================ -->
+    <record id="view_pack_exception_reject_wizard_form" model="ir.ui.view">
+        <field name="name">pack.exception.reject.wizard.form</field>
+        <field name="model">pack.exception.reject.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Reject Exception Request">
+                <group>
+                    <field name="request_id" readonly="1"/>
+                    <field name="rejection_reason"
+                           placeholder="Explain why this exception is rejected..."
+                           widget="text"/>
+                </group>
+                <footer>
+                    <button name="action_confirm_reject" string="Confirm Rejection"
+                            type="object" class="btn-danger"/>
+                    <button string="Cancel" class="btn-secondary"
+                            special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>```
+
 ## ./wizard/mass_assign_pack.py
 ```py
 from odoo import models, fields, api, _
@@ -1660,112 +1799,4 @@ class PackExceptionRejectWizard(models.TransientModel):
         # Recompute line status
         self.request_id.sale_line_id._compute_pack_status()
         return {'type': 'ir.actions.act_window_close'}```
-
-## ./wizard/mass_assign_pack_views.xml
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<odoo>
-    <!-- ============================================================ -->
-    <!-- Exception Request Wizard (from sale order line)                -->
-    <!-- ============================================================ -->
-    <record id="view_pack_exception_request_wizard_form" model="ir.ui.view">
-        <field name="name">pack.exception.request.wizard.form</field>
-        <field name="model">pack.exception.request.wizard</field>
-        <field name="arch" type="xml">
-            <form string="Request Pack Exception">
-                <group string="This quantity does not match the standard pack">
-                    <group>
-                        <field name="sale_order_id" readonly="1"/>
-                        <field name="product_id" readonly="1"/>
-                        <field name="standard_pack_id" readonly="1"/>
-                    </group>
-                    <group>
-                        <field name="requested_qty" readonly="1"/>
-                        <field name="pack_compliant_qty" readonly="1"/>
-                    </group>
-                </group>
-                <group>
-                    <field name="reason" placeholder="Explain why you need a non-standard quantity..."
-                           widget="text"/>
-                </group>
-                <field name="sale_line_id" invisible="1"/>
-                <footer>
-                    <button name="action_submit_request" string="Submit Request"
-                            type="object" class="btn-primary"
-                            icon="fa-paper-plane"/>
-                    <button string="Cancel" class="btn-secondary"
-                            special="cancel"/>
-                </footer>
-            </form>
-        </field>
-    </record>
-
-    <!-- ============================================================ -->
-    <!-- Mass Assign Pack Wizard                                       -->
-    <!-- ============================================================ -->
-    <record id="view_mass_assign_pack_wizard_form" model="ir.ui.view">
-        <field name="name">mass.assign.pack.wizard.form</field>
-        <field name="model">mass.assign.pack.wizard</field>
-        <field name="arch" type="xml">
-            <form string="Mass Assign Standard Pack">
-                <group>
-                    <group>
-                        <field name="pack_type_id"/>
-                        <field name="qty_per_pack"/>
-                        <field name="is_default"/>
-                    </group>
-                    <group>
-                        <field name="overwrite_existing"/>
-                        <field name="preview_count" readonly="1"
-                               string="Products affected"/>
-                    </group>
-                </group>
-                <group string="Specific Products (leave empty to use selected)">
-                    <field name="product_tmpl_ids" nolabel="1"
-                           widget="many2many_tags"/>
-                </group>
-                <footer>
-                    <button name="action_assign" string="Assign Pack"
-                            type="object" class="btn-primary"/>
-                    <button string="Cancel" class="btn-secondary"
-                            special="cancel"/>
-                </footer>
-            </form>
-        </field>
-    </record>
-
-    <!-- Action for wizard (from product list) -->
-    <record id="action_mass_assign_pack_wizard" model="ir.actions.act_window">
-        <field name="name">Assign Standard Pack</field>
-        <field name="res_model">mass.assign.pack.wizard</field>
-        <field name="view_mode">form</field>
-        <field name="target">new</field>
-        <field name="binding_model_id" ref="product.model_product_template"/>
-        <field name="binding_view_types">list</field>
-    </record>
-
-    <!-- ============================================================ -->
-    <!-- Reject Wizard                                                 -->
-    <!-- ============================================================ -->
-    <record id="view_pack_exception_reject_wizard_form" model="ir.ui.view">
-        <field name="name">pack.exception.reject.wizard.form</field>
-        <field name="model">pack.exception.reject.wizard</field>
-        <field name="arch" type="xml">
-            <form string="Reject Exception Request">
-                <group>
-                    <field name="request_id" readonly="1"/>
-                    <field name="rejection_reason"
-                           placeholder="Explain why this exception is rejected..."
-                           widget="text"/>
-                </group>
-                <footer>
-                    <button name="action_confirm_reject" string="Confirm Rejection"
-                            type="object" class="btn-danger"/>
-                    <button string="Cancel" class="btn-secondary"
-                            special="cancel"/>
-                </footer>
-            </form>
-        </field>
-    </record>
-</odoo>```
 
