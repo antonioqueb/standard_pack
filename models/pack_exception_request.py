@@ -114,7 +114,7 @@ class PackExceptionRequest(models.Model):
         return self.env['res.users']
 
     def _post_comment_no_autofollow(self, target_record, body):
-        """Post in chatter without creating followers automatically."""
+        """Publica comentario sin suscribir followers automáticamente."""
         if not target_record or not target_record.id:
             return
         target_record.with_context(
@@ -128,7 +128,7 @@ class PackExceptionRequest(models.Model):
         )
 
     def _create_todo_activity_once(self, target_record, user, summary, note):
-        """Create a todo activity without using activity_schedule/autofollow."""
+        """Crea actividad sin usar activity_schedule y sin autofollow."""
         if not target_record or not target_record.id or not user:
             return
 
@@ -165,7 +165,7 @@ class PackExceptionRequest(models.Model):
         })
 
     def _notify_approvers(self):
-        """Notify approvers on the exception request without touching followers."""
+        """Notifica aprobadores en la solicitud sin tocar followers."""
         self.ensure_one()
         approvers = self._get_approver_users()
         if not approvers:
@@ -205,7 +205,7 @@ class PackExceptionRequest(models.Model):
             )
 
     def _notify_requester(self, action_type):
-        """Notify requester on sale order without subscribing followers."""
+        """Notifica al solicitante en la OV sin suscribir followers."""
         self.ensure_one()
 
         if action_type == 'approved':
