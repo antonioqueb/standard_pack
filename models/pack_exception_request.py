@@ -113,6 +113,26 @@ class PackExceptionRequest(models.Model):
             return approver_group.users
         return self.env['res.users']
 
+    def _subscribe_partners_once(self, target_record, partner_ids):
+        """Subscribe only partners not already following target_record."""
+        partner_ids = list({pid for pid in (partner_ids or []) if pid})
+        if not target_record or not target_record.id or not partner_ids:
+            return []
+
+        existing_partner_ids = set(
+            self.env['mail.followers'].sudo().search([
+                ('res_model', '=', target_record._name),
+                ('res_id', '=', target_record.id),
+                ('partner_id', 'in', partner_ids),
+            ]).mapped('partner_id').ids
+        )
+
+        missing_partner_ids = [pid for pid in partner_ids if pid not in existing_partner_ids]
+        if missing_partner_ids:
+            target_record.message_subscribe(partner_ids=missing_partner_ids)
+
+        return missing_partner_ids
+
     def _notify_approvers(self):
         """Notify approvers on the exception request chatter."""
         self.ensure_one()
@@ -121,7 +141,7 @@ class PackExceptionRequest(models.Model):
             return
 
         partner_ids = approvers.mapped('partner_id').ids
-        self.message_subscribe(partner_ids=partner_ids)
+        self._subscribe_partners_once(self, partner_ids)
 
         body = Markup(
             '<strong>Nueva solicitud de excepción</strong><br/>'
@@ -165,7 +185,7 @@ class PackExceptionRequest(models.Model):
         self.ensure_one()
         requester_partner_id = self.requester_id.partner_id.id
 
-        self.sale_order_id.message_subscribe(partner_ids=[requester_partner_id])
+        self._subscribe_partners_once(self.sale_order_id, [requester_partner_id])
 
         if action_type == 'approved':
             body = Markup(
@@ -196,10 +216,9 @@ class PackExceptionRequest(models.Model):
             body=body,
             message_type='comment',
             subtype_xmlid='mail.mt_comment',
-            partner_ids=[requester_partner_id],
+            partner_ids=[requester_partner_id] if requester_partner_id else [],
         )
 
-        # Create activity on the sale order for the requester
         if action_type == 'approved':
             summary = _('Excepción aprobada — confirmar orden')
             note = _('La excepción para %s (%s uds) fue aprobada. Puedes confirmar la orden.',
