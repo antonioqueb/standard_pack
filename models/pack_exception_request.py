@@ -113,35 +113,63 @@ class PackExceptionRequest(models.Model):
             return approver_group.users
         return self.env['res.users']
 
-    def _subscribe_partners_once(self, target_record, partner_ids):
-        """Subscribe only partners not already following target_record."""
-        partner_ids = list({pid for pid in (partner_ids or []) if pid})
-        if not target_record or not target_record.id or not partner_ids:
-            return []
-
-        existing_partner_ids = set(
-            self.env['mail.followers'].sudo().search([
-                ('res_model', '=', target_record._name),
-                ('res_id', '=', target_record.id),
-                ('partner_id', 'in', partner_ids),
-            ]).mapped('partner_id').ids
+    def _post_comment_no_autofollow(self, target_record, body):
+        """Post in chatter without creating followers automatically."""
+        if not target_record or not target_record.id:
+            return
+        target_record.with_context(
+            mail_post_autofollow=False,
+            mail_create_nosubscribe=True,
+            mail_notify_force_send=False,
+        ).message_post(
+            body=body,
+            message_type='comment',
+            subtype_xmlid='mail.mt_comment',
         )
 
-        missing_partner_ids = [pid for pid in partner_ids if pid not in existing_partner_ids]
-        if missing_partner_ids:
-            target_record.message_subscribe(partner_ids=missing_partner_ids)
+    def _create_todo_activity_once(self, target_record, user, summary, note):
+        """Create a todo activity without using activity_schedule/autofollow."""
+        if not target_record or not target_record.id or not user:
+            return
 
-        return missing_partner_ids
+        activity_type = self.env.ref('mail.mail_activity_data_todo', raise_if_not_found=False)
+        if not activity_type:
+            return
+
+        model = self.env['ir.model']._get(target_record._name)
+        if not model:
+            return
+
+        deadline = fields.Date.context_today(self)
+
+        existing = self.env['mail.activity'].search([
+            ('res_model_id', '=', model.id),
+            ('res_id', '=', target_record.id),
+            ('user_id', '=', user.id),
+            ('activity_type_id', '=', activity_type.id),
+            ('summary', '=', summary),
+            ('date_deadline', '=', deadline),
+        ], limit=1)
+
+        if existing:
+            return
+
+        self.env['mail.activity'].create({
+            'activity_type_id': activity_type.id,
+            'res_model_id': model.id,
+            'res_id': target_record.id,
+            'user_id': user.id,
+            'summary': summary,
+            'note': note,
+            'date_deadline': deadline,
+        })
 
     def _notify_approvers(self):
-        """Notify approvers on the exception request chatter."""
+        """Notify approvers on the exception request without touching followers."""
         self.ensure_one()
         approvers = self._get_approver_users()
         if not approvers:
             return
-
-        partner_ids = approvers.mapped('partner_id').ids
-        self._subscribe_partners_once(self, partner_ids)
 
         body = Markup(
             '<strong>Nueva solicitud de excepción</strong><br/>'
@@ -158,34 +186,27 @@ class PackExceptionRequest(models.Model):
             std=escape(self.standard_pack_id.display_name or 'N/A'),
             reason=escape(self.reason or ''),
         )
-        self.message_post(
-            body=body,
-            message_type='comment',
-            subtype_xmlid='mail.mt_comment',
-            partner_ids=partner_ids,
-        )
+
+        self._post_comment_no_autofollow(self, body)
 
         for approver in approvers:
-            self.activity_schedule(
-                'mail.mail_activity_data_todo',
-                user_id=approver.id,
-                summary=_('Excepción pack: %s — %s',
-                          self.product_id.display_name,
-                          self.sale_order_id.name),
-                note=_('%s solicita vender %s de %s (pack estándar: %s). Motivo: %s',
-                       self.requester_id.name,
-                       f"{self.requested_qty:g}",
-                       self.product_id.display_name,
-                       self.standard_pack_id.display_name or 'N/A',
-                       self.reason or ''),
+            self._create_todo_activity_once(
+                self,
+                approver,
+                _('Excepción pack: %s — %s',
+                  self.product_id.display_name,
+                  self.sale_order_id.name),
+                _('%s solicita vender %s de %s (pack estándar: %s). Motivo: %s',
+                  self.requester_id.name,
+                  f"{self.requested_qty:g}",
+                  self.product_id.display_name,
+                  self.standard_pack_id.display_name or 'N/A',
+                  self.reason or ''),
             )
 
     def _notify_requester(self, action_type):
-        """Notify the requester ONLY on the sale order chatter."""
+        """Notify requester on sale order without subscribing followers."""
         self.ensure_one()
-        requester_partner_id = self.requester_id.partner_id.id
-
-        self._subscribe_partners_once(self.sale_order_id, [requester_partner_id])
 
         if action_type == 'approved':
             body = Markup(
@@ -198,6 +219,10 @@ class PackExceptionRequest(models.Model):
                 qty=f"{self.requested_qty:g}",
                 approver=escape(self.env.user.name),
             )
+            summary = _('Excepción aprobada — confirmar orden')
+            note = _('La excepción para %s (%s uds) fue aprobada. Puedes confirmar la orden.',
+                     self.product_id.display_name,
+                     f"{self.requested_qty:g}")
         else:
             body = Markup(
                 '<strong>❌ Excepción de pack rechazada</strong><br/>'
@@ -211,31 +236,18 @@ class PackExceptionRequest(models.Model):
                 approver=escape(self.env.user.name),
                 reason=escape(self.rejection_reason or ''),
             )
-
-        self.sale_order_id.message_post(
-            body=body,
-            message_type='comment',
-            subtype_xmlid='mail.mt_comment',
-            partner_ids=[requester_partner_id] if requester_partner_id else [],
-        )
-
-        if action_type == 'approved':
-            summary = _('Excepción aprobada — confirmar orden')
-            note = _('La excepción para %s (%s uds) fue aprobada. Puedes confirmar la orden.',
-                     self.product_id.display_name,
-                     f"{self.requested_qty:g}")
-        else:
             summary = _('Excepción rechazada — ajustar cantidad')
             note = _('La excepción para %s (%s uds) fue rechazada. Motivo: %s',
                      self.product_id.display_name,
                      f"{self.requested_qty:g}",
                      self.rejection_reason or '')
 
-        self.sale_order_id.activity_schedule(
-            'mail.mail_activity_data_todo',
-            user_id=self.requester_id.id,
-            summary=summary,
-            note=note,
+        self._post_comment_no_autofollow(self.sale_order_id, body)
+        self._create_todo_activity_once(
+            self.sale_order_id,
+            self.requester_id,
+            summary,
+            note,
         )
 
     def action_approve(self):
